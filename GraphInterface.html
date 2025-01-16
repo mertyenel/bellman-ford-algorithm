@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>Bellman-Ford Hesaplayıcı</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        /* Sayfa genelini iki sütuna bölen stil */
+        .container {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        /* Sol taraf: Form ve tablo */
+        .form-container {
+            width: 40%;
+        }
+
+        /* Sağ taraf: Grafik */
+        .graph-container {
+            width: 55%;
+        }
+
+        #network {
+            width: 100%;
+            height: 600px;
+            border: 1px solid lightgray;
+            margin-top: 20px;
+        }
+
+        table {
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+
+        table, th, td {
+            border: 1px solid black;
+        }
+
+        th, td {
+            padding: 5px;
+        }
+
+        #edgeTable input {
+            width: 100px;
+        }
+
+        #addRemoveEdgeBtn {
+            margin-top: 5px;
+        }
+
+        /* Graf Türü Seçim Butonları */
+        .graph-type {
+            margin-top: 10px;
+        }
+
+        .graph-type label {
+            margin-right: 10px;
+        }
+
+        /* Buton Stilleri */
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 5px;
+        }
+
+        /* Çıktı Bölümü */
+        #output {
+            margin-top: 20px;
+            white-space: pre-wrap; /* Metin taşmasını önler */
+        }
+    </style>
+</head>
+<body>
+    <h1>Bellman-Ford Algoritması Hesaplayıcı</h1>
+    <div class="container">
+        <!-- Sol Sütun: Form ve Kenar Tablosu -->
+        <div class="form-container">
+            <div class="graph-type">
+                <label><input type="radio" name="graphType" value="directed" checked> Tek Yönlü</label>
+                <label><input type="radio" name="graphType" value="undirected"> Çok Yönlü</label>
+            </div>
+            <br>
+            <label for="nodeCount">Düğüm sayısı:</label>
+            <input type="number" id="nodeCount" placeholder="Değer giriniz" min="1" />
+            <br>
+            <label for="edgeCount">Kenar sayısı:</label>
+            <input type="number" id="edgeCount" placeholder="Değer giriniz" min="0" />
+            <br>
+            <label>Kenarlar (kaynak, hedef, ağırlık):</label>
+            <table id="edgeTable">
+                <tr>
+                    <th>Kaynak</th>
+                    <th>Hedef</th>
+                    <th>Ağırlık</th>
+                </tr>
+                <!-- Kenar satırları buraya eklenecek -->
+            </table>
+            <div class="button-group">
+                <button id="addEdgeBtn">+</button>
+                <button id="removeEdgeBtn">-</button>
+            </div>
+            <br>
+            <label for="sourceNode">Başlangıç düğümü:</label>
+            <input type="text" id="sourceNode" value="0" />
+            <br><br>
+            <button onclick="validateAndDrawGraph()">Grafiği Çiz</button>
+
+            <!-- Çıktı Bölümü -->
+            <pre id="output"></pre>
+        </div>
+
+        <!-- Sağ Sütun: Grafik -->
+        <div class="graph-container">
+            <div id="network"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+    <script>
+        // Graf Türünü Takip Eden Değişken
+        let isDirected = true;
+
+        // Radyo Butonları ile Graf Türünü Belirleme
+        document.querySelectorAll('input[name="graphType"]').forEach(function(elem) {
+            elem.addEventListener('change', function(event) {
+                isDirected = event.target.value === 'directed';
+                // Kenar tablosunu temizleyip varsayılan kenarları yeniden eklemek
+                resetEdgeTable();
+            });
+        });
+
+        // Kenar Tablosunu Sıfırlama Fonksiyonu
+        function resetEdgeTable() {
+            var edgeTable = document.getElementById('edgeTable');
+            // Başlık satırını koruyarak diğer satırları sil
+            while (edgeTable.rows.length > 1) {
+                edgeTable.deleteRow(1);
+            }
+
+            // Varsayılan kenarları ekle (Yönlü veya Yönsüz)
+            var defaultEdges = [
+                {from: 0, to: 1, weight: 1},
+                {from: 0, to: 2, weight: 4},
+                {from: 1, to: 2, weight: 3},
+                {from: 1, to: 3, weight: 2},
+                {from: 1, to: 4, weight: 2},
+                {from: 3, to: 2, weight: 5},
+                {from: 4, to: 3, weight: 3}
+            ];
+
+            defaultEdges.forEach(function(edge) {
+                addEdgeRow(edge.from, edge.to, edge.weight);
+            });
+        }
+
+        // Placeholder Temizleme ve Geri Yükleme
+        document.getElementById('nodeCount').addEventListener('focus', function () {
+            this.placeholder = '';  // Tıklandığında placeholder silinir
+        });
+        
+        document.getElementById('nodeCount').addEventListener('blur', function () {
+            if (this.value === '') {
+              this.placeholder = 'Değer giriniz';  // Boş bırakılırsa placeholder geri gelir
+            }
+        });
+        
+        document.getElementById('edgeCount').addEventListener('focus', function () {
+            this.placeholder = '';
+        });
+        
+        document.getElementById('edgeCount').addEventListener('blur', function () {
+            if (this.value === '') {
+              this.placeholder = 'Değer giriniz';
+            }
+        });
+
+        var nodes = new vis.DataSet([]);
+        var edges = new vis.DataSet([]);
+
+        var container = document.getElementById('network');
+        var data = { nodes: nodes, edges: edges };
+        var options = {
+            edges: {
+                color: '#848484',
+                arrows: {
+                    to: { enabled: isDirected, scaleFactor: 1 }
+                },
+                font: {
+                    align: 'top'
+                }
+            },
+            physics: {
+                enabled: true,
+                stabilization: {
+                    iterations: 1000,
+                    updateInterval: 25
+                }
+            },
+            layout: {
+                improvedLayout: true
+            }
+        };
+        var network = new vis.Network(container, data, options);
+
+        // Kenar tablosunu doldur
+        var edgeTable = document.getElementById('edgeTable');
+
+        function addEdgeRow(from = '', to = '', weight = '') {
+            var row = edgeTable.insertRow();
+            var cellFrom = row.insertCell(0);
+            var cellTo = row.insertCell(1);
+            var cellWeight = row.insertCell(2);
+
+            var inputFrom = document.createElement('input');
+            inputFrom.type = 'text';
+            inputFrom.value = from;
+            cellFrom.appendChild(inputFrom);
+
+            var inputTo = document.createElement('input');
+            inputTo.type = 'text';
+            inputTo.value = to;
+            cellTo.appendChild(inputTo);
+
+            var inputWeight = document.createElement('input');
+            inputWeight.type = 'number';
+            inputWeight.value = weight;
+            cellWeight.appendChild(inputWeight);
+        }
+
+        // Varsayılan kenarları ekle
+        resetEdgeTable();
+
+        // + Butonuna tıklandığında kenar ekle
+        document.getElementById('addEdgeBtn').addEventListener('click', function() {
+            addEdgeRow();
+        });
+
+        // - Butonuna tıklandığında son kenar satırını sil
+        document.getElementById('removeEdgeBtn').addEventListener('click', function() {
+            var rowCount = edgeTable.rows.length;
+            if (rowCount > 1) { // Başlık satırı hariç
+                edgeTable.deleteRow(rowCount - 1);
+            } else {
+                Swal.fire({
+                    title: 'Uyarı!',
+                    text: 'Silinecek kenar kalmadı.',
+                    icon: 'warning',
+                    confirmButtonText: 'Tamam'
+                });
+            }
+        });
+
+        function drawGraph() {
+            var nodeCountInput = parseInt(document.getElementById('nodeCount').value);
+            var edgeCountInput = parseInt(document.getElementById('edgeCount').value);
+            var sourceNode = document.getElementById('sourceNode').value;
+
+            // Kenarları al
+            var edgesData = [];
+            var rowCount = edgeTable.rows.length;
+            var maxEdges = Math.min(edgeCountInput, rowCount - 1); // Kenar sayısını sınırla
+            var addedEdges = new Set(); // Çift yönlü graf için eklenen kenarları takip et
+
+            for (var i = 1; i <= maxEdges; i++) { // İlk satır başlık
+                var row = edgeTable.rows[i];
+                var from = row.cells[0].children[0].value;
+                var to = row.cells[1].children[0].value;
+                var weight = parseInt(row.cells[2].children[0].value);
+
+                if (from !== '' && to !== '' && !isNaN(weight)) {
+                    if (!isDirected) {
+                        var edgeKey = from < to ? from + '-' + to : to + '-' + from;
+                        if (addedEdges.has(edgeKey)) {
+                            continue; // Aynı kenar zaten eklenmiş
+                        }
+                        addedEdges.add(edgeKey);
+                    }
+
+                    edgesData.push({
+                        id: 'e' + (i - 1) + '_' + Math.random().toString(36).substr(2, 9), // Benzersiz ID
+                        from: from.toString(),
+                        to: to.toString(),
+                        label: weight.toString(),
+                        arrows: isDirected ? 'to' : '',
+                        weight: weight,
+                        color: { color: '#848484' }
+                    });
+                }
+            }
+
+            // Düğümleri oluştur
+            var nodeIdsSet = new Set();
+            edgesData.forEach(function(edge) {
+                nodeIdsSet.add(edge.from);
+                nodeIdsSet.add(edge.to);
+            });
+
+            var nodeIdsArray = Array.from(nodeIdsSet);
+            var maxNodes = Math.min(nodeCountInput, nodeIdsArray.length); // Düğüm sayısını sınırla
+            nodeIdsArray = nodeIdsArray.slice(0, maxNodes);
+
+            var nodesData = nodeIdsArray.map(function(id) {
+                return { id: id.toString(), label: id.toString() };
+            });
+
+            var validNodeIdsSet = new Set(nodeIdsArray);
+
+            // Kenarları, sadece geçerli düğümleri içerecek şekilde filtrele
+            edgesData = edgesData.filter(function(edge) {
+                return validNodeIdsSet.has(edge.from) && validNodeIdsSet.has(edge.to);
+            });
+
+            // Verileri güncelle
+            nodes.clear();
+            edges.clear();
+            nodes.add(nodesData);
+            edges.add(edgesData);
+
+            // Vis Network'ü güncelle
+            network.setOptions({
+                edges: {
+                    color: '#848484',
+                    arrows: {
+                        to: { enabled: isDirected, scaleFactor: 1 }
+                    },
+                    font: {
+                        align: 'top'
+                    }
+                }
+            });
+
+            // Yönsüz grafikte ters kenarları ekle
+            if (!isDirected) {
+                var reverseEdges = edgesData.map(function(edge) {
+                    return {
+                        id: edge.id + '_rev',
+                        from: edge.to,
+                        to: edge.from,
+                        label: edge.label,
+                        weight: edge.weight,
+                        color: { color: '#848484' }
+                    };
+                });
+                edgesData = edgesData.concat(reverseEdges);
+            }
+
+            // Bellman-Ford'u çalıştır
+            runBellmanFordFromData(nodesData, edgesData, sourceNode);
+        }
+
+        function validateAndDrawGraph() {
+            var nodeCount = document.getElementById('nodeCount').value;
+            var edgeCount = document.getElementById('edgeCount').value;
+
+            // Değerler doğruysa, grafiği çizme fonksiyonunu çalıştır
+            drawGraph();
+        }
+
+        function runBellmanFordFromData(nodesData, edgesData, source) {
+            var dist = {};
+            var V = nodesData.length;
+
+            nodesData.forEach(function(node) {
+                dist[node.id] = Infinity;
+            });
+
+            dist[source] = 0;
+
+            // Bellman-Ford Algoritması
+            for (var i = 0; i < V - 1; i++) {
+                edgesData.forEach(function(edge) {
+                    var u = edge.from;
+                    var v = edge.to;
+                    var w = edge.weight;
+
+                    if (dist[u] + w < dist[v]) {
+                        dist[v] = dist[u] + w;
+                    }
+                });
+            }
+
+            // Negatif döngü kontrolü
+            var hasNegativeCycle = false;
+            edgesData.forEach(function(edge) {
+                var u = edge.from;
+                var v = edge.to;
+                var w = edge.weight;
+
+                if (dist[u] + w < dist[v]) {
+                    hasNegativeCycle = true;
+                }
+            });
+
+            if (hasNegativeCycle) {
+                document.getElementById('output').innerText = "Graf negatif ağırlıklı bir döngü içeriyor!";
+            } else {
+                document.getElementById('output').innerText = "Düğüm Mesafeleri:\n" + JSON.stringify(dist, null, 2);
+            }
+
+            // Her durumda başlangıç düğümünü vurgula
+            highlightStartingNode(source);
+
+            // Negatif döngü yoksa en kısa yolları vurgula
+            if (!hasNegativeCycle) {
+                highlightShortestPaths(dist, edgesData, source);
+            }
+        }
+
+        function highlightStartingNode(source) {
+            // Tüm düğümleri varsayılan renge döndür
+            nodes.update(nodes.get().map(node => ({ id: node.id, color: { background: '#97C2FC' } })));
+            // Başlangıç düğümünü kırmızıya boyayın
+            nodes.update({ id: source, color: { background: 'red' } });
+        }
+
+        function highlightShortestPaths(dist, edgesData, source) {
+            // Kenarları ve düğümleri varsayılan hale getir
+            edges.update(edgesData.map(edge => ({ id: edge.id, color: { color: '#848484' }, width: 1 })));
+            nodes.update(nodes.get().map(node => ({ id: node.id, color: { background: '#97C2FC' } })));
+        
+            // En kısa yolları belirle
+            var predecessors = {};
+            nodes.get().forEach(function(node) {
+                predecessors[node.id] = null;
+            });
+        
+            var V = nodes.length;
+            for (var i = 0; i < V - 1; i++) {
+                edgesData.forEach(function(edge) {
+                    var u = edge.from;
+                    var v = edge.to;
+                    var w = edge.weight;
+        
+                    if (dist[u] + w < dist[v]) {
+                        dist[v] = dist[u] + w;
+                        predecessors[v] = u;
+                    }
+                });
+            }
+        
+            // En kısa yolları vurgula
+            for (var nodeId in predecessors) {
+                if (predecessors[nodeId] !== null) {
+                    var edge = edges.get({
+                        filter: function(item) {
+                            return item.from == predecessors[nodeId] && item.to == nodeId;
+                        }
+                    })[0];
+        
+                    if (edge) {
+                        edges.update({ id: edge.id, color: { color: 'red' }, width: 2 });
+                    }
+                }
+            }
+        
+            // Başlangıç düğümünü kırmızıya boyayın
+            nodes.update({ id: source, color: { background: 'red' } });
+        }
+    </script>
+</body>
+</html>
